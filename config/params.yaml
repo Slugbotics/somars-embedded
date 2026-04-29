@@ -1,0 +1,31 @@
+# =============================================================================
+# SOMARS Controls – Runtime Parameters
+# =============================================================================
+# Load via:  ros2 launch somars_controls controls.launch.py
+# Override on CLI:  --ros-args -p camera_fx:=800.0
+
+target_localizer:
+  ros__parameters:
+    # Camera intrinsics – replace with values from your calibration
+    camera_fx: 600.0
+    camera_fy: 600.0
+    camera_cx: 320.0
+    camera_cy: 240.0
+
+    # Camera mount pitch relative to body frame (radians)
+    #   0      → forward-facing
+    #  -π/2    → straight down (typical for survey)
+    camera_pitch_rad: -1.5708
+
+guidance_node:
+  ros__parameters:
+    approach_speed: 2.0       # m/s – max horizontal approach speed
+    acceptance_radius: 1.0    # m   – "close enough" to target
+    loiter_altitude: -10.0    # NED z (negative = above ground), 10 m AGL
+    control_rate_hz: 20.0     # Hz  – main control loop frequency
+
+offboard_manager:
+  ros__parameters:
+    heartbeat_rate_hz: 10.0   # Hz  – OffboardControlMode publish rate
+    auto_arm: false           # !! Set true ONLY for bench/sim testing !!
+    arm_delay_s: 2.0          # Seconds of valid heartbeat before arm attempt
