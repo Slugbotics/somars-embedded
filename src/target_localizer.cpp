@@ -1,6 +1,8 @@
 #include "somars_controls/target_localizer.hpp"
+#include "somars_controls/projection.hpp"
 
 #include <cmath>
+#include <string>
 
 namespace somars_controls
 {
@@ -22,11 +24,11 @@ TargetLocalizer::TargetLocalizer()
   double cam_pitch = this->get_parameter("camera_pitch_rad").as_double();
 
   // Build the fixed camera-to-body rotation.
-  // Assumes the camera optical axis is mounted in the body XZ-plane,
-  // pitched by cam_pitch about the body Y-axis.
-  //   body X = forward, Y = right, Z = down  (FRD)
-  //   camera Z = optical axis (into scene)
-  R_cam_to_body_ = Eigen::AngleAxisd(cam_pitch, Eigen::Vector3d::UnitY()).toRotationMatrix();
+  // Handles the base alignment (camera optical → body FRD) PLUS the
+  // pitch offset for the physical mount angle.
+  //   camera: X = right, Y = down, Z = into scene
+  //   body:   X = forward, Y = right, Z = down  (FRD)
+  R_cam_to_body_ = projection::build_cam_to_body_rotation(cam_pitch);
 
   RCLCPP_INFO(this->get_logger(),
     "Camera intrinsics  fx=%.1f fy=%.1f cx=%.1f cy=%.1f  pitch=%.2f rad",
@@ -84,10 +86,12 @@ void TargetLocalizer::detection_cb(
     return;
   }
 
+  static const char * class_names[] = {"red", "black", "white", "unknown"};
+
   for (const auto & pose : msg->poses) {
     double u = pose.position.x;   // pixel column
     double v = pose.position.y;   // pixel row
-    // int class_id = static_cast<int>(pose.position.z);  // TODO: use class
+    int class_id = std::clamp(static_cast<int>(pose.position.z), 0, 3);
 
     Eigen::Vector3d target_ned;
     if (!pixel_to_ned(u, v, target_ned)) {
@@ -97,15 +101,15 @@ void TargetLocalizer::detection_cb(
 
     geometry_msgs::msg::PointStamped out;
     out.header.stamp    = this->now();
-    out.header.frame_id = "map_ned";
+    out.header.frame_id = std::string("target_") + class_names[class_id];
     out.point.x = target_ned.x();
     out.point.y = target_ned.y();
     out.point.z = target_ned.z();
     target_ned_pub_->publish(out);
 
-    RCLCPP_DEBUG(this->get_logger(),
-      "Target NED: [%.2f, %.2f, %.2f]",
-      target_ned.x(), target_ned.y(), target_ned.z());
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+      "Target [%s] NED: [%.2f, %.2f, %.2f]  from pixel [%.0f, %.0f]",
+      class_names[class_id], target_ned.x(), target_ned.y(), target_ned.z(), u, v);
   }
 }
 
@@ -116,25 +120,10 @@ void TargetLocalizer::detection_cb(
 bool TargetLocalizer::pixel_to_ned(
   double u, double v, Eigen::Vector3d & target_ned) const
 {
-  // 1. Pixel → normalised camera-frame ray
-  Eigen::Vector3d ray_cam((u - cx_) / fx_, (v - cy_) / fy_, 1.0);
-  ray_cam.normalize();
-
-  // 2. Camera frame → body frame → NED frame
-  Eigen::Matrix3d R_body_to_ned = vehicle_attitude_.toRotationMatrix();
-  Eigen::Vector3d ray_ned = R_body_to_ned * R_cam_to_body_ * ray_cam;
-
-  // 3. Intersect with ground plane (NED z = 0).
-  //    Drone is at vehicle_position_ned_.z() (negative when above ground).
-  //    We need the ray to point downward (positive z in NED) to hit ground.
-  if (ray_ned.z() <= 1e-6) {
-    return false;  // ray is parallel to or pointing away from ground
-  }
-
-  double t = -vehicle_position_ned_.z() / ray_ned.z();
-  target_ned = vehicle_position_ned_ + t * ray_ned;
-  target_ned.z() = 0.0;  // on the ground plane
-  return true;
+  return projection::project_pixel_to_ned(
+    u, v, fx_, fy_, cx_, cy_,
+    R_cam_to_body_, vehicle_attitude_, vehicle_position_ned_,
+    target_ned);
 }
 
 Eigen::Matrix3d TargetLocalizer::quat_to_rotation(

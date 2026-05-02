@@ -39,6 +39,10 @@ add_executable(offboard_manager src/offboard_manager.cpp)
 ament_target_dependencies(offboard_manager
   rclcpp px4_msgs std_msgs)
 
+add_executable(mock_nodes test/mock_nodes.cpp)
+ament_target_dependencies(mock_nodes
+  rclcpp px4_msgs geometry_msgs std_msgs)
+
 # ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
@@ -47,12 +51,14 @@ install(TARGETS
   target_localizer
   guidance_node
   offboard_manager
+  mock_nodes
   DESTINATION lib/${PROJECT_NAME}
 )
 
 install(DIRECTORY
   launch
   config
+  test
   DESTINATION share/${PROJECT_NAME}
 )
 

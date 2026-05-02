@@ -8,7 +8,8 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     pkg_share = get_package_share_directory('somars_controls')
-    params_file = os.path.join(pkg_share, 'config', 'params.yaml')
+    params_file    = os.path.join(pkg_share, 'config', 'params.yaml')
+    waypoints_file = os.path.join(pkg_share, 'config', 'waypoints.yaml')
 
     return LaunchDescription([
         Node(
@@ -22,7 +23,7 @@ def generate_launch_description():
             package='somars_controls',
             executable='guidance_node',
             name='guidance_node',
-            parameters=[params_file],
+            parameters=[params_file, waypoints_file],
             output='screen',
         ),
         Node(

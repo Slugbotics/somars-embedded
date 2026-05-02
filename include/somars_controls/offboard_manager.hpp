@@ -5,6 +5,7 @@
 #include <px4_msgs/msg/offboard_control_mode.hpp>
 #include <px4_msgs/msg/trajectory_setpoint.hpp>
 #include <px4_msgs/msg/vehicle_command.hpp>
+#include <px4_msgs/msg/vehicle_local_position.hpp>
 #include <px4_msgs/msg/vehicle_status.hpp>
 
 namespace somars_controls
@@ -47,8 +48,12 @@ private:
   void disarm();
   void set_offboard_mode();
 
+  // ---- callbacks ----
+  void local_position_cb(const px4_msgs::msg::VehicleLocalPosition::SharedPtr msg);
+
   // ---- subscribers ----
   rclcpp::Subscription<px4_msgs::msg::VehicleStatus>::SharedPtr status_sub_;
+  rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr local_pos_sub_;
 
   // ---- publishers ----
   rclcpp::Publisher<px4_msgs::msg::OffboardControlMode>::SharedPtr control_mode_pub_;
@@ -62,6 +67,10 @@ private:
   uint8_t nav_state_    = 0;
   uint8_t arming_state_ = 0;
   int     heartbeat_count_ = 0;
+  float   hold_x_ = 0.0f;
+  float   hold_y_ = 0.0f;
+  float   hold_z_ = -10.0f;   // NED, default 10 m AGL
+  bool    position_received_ = false;
 
   // ---- parameters ----
   bool   auto_arm_;

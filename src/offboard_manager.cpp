@@ -1,6 +1,7 @@
 #include "somars_controls/offboard_manager.hpp"
 
 #include <chrono>
+#include <limits>
 
 using namespace std::chrono_literals;
 
@@ -31,6 +32,10 @@ OffboardManager::OffboardManager()
   status_sub_ = this->create_subscription<px4_msgs::msg::VehicleStatus>(
     "/fmu/out/vehicle_status", px4_qos,
     std::bind(&OffboardManager::status_cb, this, std::placeholders::_1));
+
+  local_pos_sub_ = this->create_subscription<px4_msgs::msg::VehicleLocalPosition>(
+    "/fmu/out/vehicle_local_position", px4_qos,
+    std::bind(&OffboardManager::local_position_cb, this, std::placeholders::_1));
 
   // ---- publishers ----
   control_mode_pub_ = this->create_publisher<px4_msgs::msg::OffboardControlMode>(
@@ -63,6 +68,15 @@ void OffboardManager::status_cb(
   arming_state_ = msg->arming_state;
 }
 
+void OffboardManager::local_position_cb(
+  const px4_msgs::msg::VehicleLocalPosition::SharedPtr msg)
+{
+  hold_x_ = msg->x;
+  hold_y_ = msg->y;
+  hold_z_ = msg->z;
+  position_received_ = true;
+}
+
 // ---------------------------------------------------------------------------
 // Heartbeat
 // ---------------------------------------------------------------------------
@@ -83,12 +97,13 @@ void OffboardManager::heartbeat_loop()
 
   // 2. Hold-position setpoint (keeps PX4 happy while no guidance is active).
   //    The guidance_node will overwrite this once it starts publishing.
+  //    Uses current position if known; otherwise a safe default.
   px4_msgs::msg::TrajectorySetpoint sp{};
   sp.timestamp    = ts;
-  sp.position[0]  = 0.0f;
-  sp.position[1]  = 0.0f;
-  sp.position[2]  = -10.0f;   // 10 m AGL (NED)
-  sp.yaw          = 0.0f;
+  sp.position[0]  = hold_x_;
+  sp.position[1]  = hold_y_;
+  sp.position[2]  = hold_z_;
+  sp.yaw          = std::numeric_limits<float>::quiet_NaN();  // hold current heading
   setpoint_pub_->publish(sp);
 
   heartbeat_count_++;

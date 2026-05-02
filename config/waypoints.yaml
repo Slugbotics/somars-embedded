@@ -1,0 +1,52 @@
+# =====================================================================
+#
+#  >>> COMPETITION WAYPOINTS — EDIT THIS FILE ON FLIGHT DAY <<<
+#
+# =====================================================================
+#
+#  At check-in you will receive a list of GPS waypoints.
+#  Paste the coordinates into the three arrays below (lat, lon, alt).
+#  They MUST be the same length and in the same order.
+#
+#  Format:
+#    Latitude   — decimal degrees (e.g. 38.315339)
+#    Longitude  — decimal degrees (e.g. -76.548108)
+#    Altitude   — feet MSL       (e.g. 200.0)
+#
+#  SUAS 2026: up to 15 waypoints per lap, must fly within 100 ft (30 m)
+#  C-UASC:    similar format, given at check-in
+#
+# =====================================================================
+
+guidance_node:
+  ros__parameters:
+
+    # ---------- MISSION SETTINGS ----------
+    waypoint_laps: 4               # number of full laps before search phase
+    waypoint_radius_m: 30.0        # "reached" radius in meters (SUAS: 100 ft ≈ 30 m)
+
+    # ---------- WAYPOINTS (paste competition coords here) ----------
+    # Example: SUAS sample lap around Maryland (NOT real competition data)
+    waypoints_lat:
+      - 38.315339
+      - 38.315805
+      - 38.316847
+      - 38.318212
+      - 38.319640
+      - 38.318400
+
+    waypoints_lon:
+      - -76.548108
+      - -76.550537
+      - -76.553244
+      - -76.550048
+      - -76.547900
+      - -76.545200
+
+    waypoints_alt_ft:
+      - 200.0
+      - 250.0
+      - 200.0
+      - 300.0
+      - 250.0
+      - 200.0
