@@ -11,10 +11,9 @@
 #  Format:
 #    Latitude   — decimal degrees (e.g. 38.315339)
 #    Longitude  — decimal degrees (e.g. -76.548108)
-#    Altitude   — feet MSL       (e.g. 200.0)
+#    Altitude   — meters MSL     (e.g. 61.0)
 #
-#  SUAS 2026: up to 15 waypoints per lap, must fly within 100 ft (30 m)
-#  C-UASC:    similar format, given at check-in
+#  C-UASC 2026: similar format, given at check-in
 #
 # =====================================================================
 
@@ -43,10 +42,10 @@ guidance_node:
       - -76.547900
       - -76.545200
 
-    waypoints_alt_ft:
-      - 200.0
-      - 250.0
-      - 200.0
-      - 300.0
-      - 250.0
-      - 200.0
+    waypoints_alt_m:
+      - 61.0
+      - 76.2
+      - 61.0
+      - 91.4
+      - 76.2
+      - 61.0

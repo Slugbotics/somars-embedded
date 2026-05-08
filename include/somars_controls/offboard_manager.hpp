@@ -3,9 +3,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <px4_msgs/msg/offboard_control_mode.hpp>
-#include <px4_msgs/msg/trajectory_setpoint.hpp>
 #include <px4_msgs/msg/vehicle_command.hpp>
-#include <px4_msgs/msg/vehicle_local_position.hpp>
 #include <px4_msgs/msg/vehicle_status.hpp>
 
 namespace somars_controls
@@ -14,18 +12,20 @@ namespace somars_controls
 /// Manages the PX4 offboard-mode lifecycle.
 ///
 /// Responsibilities:
-///   1. Publish OffboardControlMode + a hold-position TrajectorySetpoint at a
-///      steady heartbeat rate so PX4 accepts/maintains offboard mode.
+///   1. Publish OffboardControlMode at a steady heartbeat rate so PX4
+///      accepts/maintains offboard mode.
 ///   2. Optionally send arm and mode-switch VehicleCommands after a
 ///      configurable delay (guarded by the `auto_arm` parameter).
 ///   3. Monitor VehicleStatus to track arming and nav state.
+///
+/// NOTE: TrajectorySetpoint is published solely by guidance_node to avoid
+///       dual-publisher conflicts on the same topic.
 ///
 /// Subscriptions
 ///   /fmu/out/vehicle_status  – VehicleStatus (PX4)
 ///
 /// Publications
 ///   /fmu/in/offboard_control_mode  – OffboardControlMode
-///   /fmu/in/trajectory_setpoint    – TrajectorySetpoint (hold setpoint)
 ///   /fmu/in/vehicle_command        – VehicleCommand
 class OffboardManager : public rclcpp::Node
 {
@@ -48,16 +48,11 @@ private:
   void disarm();
   void set_offboard_mode();
 
-  // ---- callbacks ----
-  void local_position_cb(const px4_msgs::msg::VehicleLocalPosition::SharedPtr msg);
-
   // ---- subscribers ----
   rclcpp::Subscription<px4_msgs::msg::VehicleStatus>::SharedPtr status_sub_;
-  rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr local_pos_sub_;
 
   // ---- publishers ----
   rclcpp::Publisher<px4_msgs::msg::OffboardControlMode>::SharedPtr control_mode_pub_;
-  rclcpp::Publisher<px4_msgs::msg::TrajectorySetpoint>::SharedPtr setpoint_pub_;
   rclcpp::Publisher<px4_msgs::msg::VehicleCommand>::SharedPtr command_pub_;
 
   // ---- timer ----
@@ -67,10 +62,7 @@ private:
   uint8_t nav_state_    = 0;
   uint8_t arming_state_ = 0;
   int     heartbeat_count_ = 0;
-  float   hold_x_ = 0.0f;
-  float   hold_y_ = 0.0f;
-  float   hold_z_ = -10.0f;   // NED, default 10 m AGL
-  bool    position_received_ = false;
+  bool    status_received_ = false;
 
   // ---- parameters ----
   bool   auto_arm_;

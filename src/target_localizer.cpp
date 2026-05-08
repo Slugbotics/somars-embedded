@@ -34,6 +34,23 @@ TargetLocalizer::TargetLocalizer()
     "Camera intrinsics  fx=%.1f fy=%.1f cx=%.1f cy=%.1f  pitch=%.2f rad",
     fx_, fy_, cx_, cy_, cam_pitch);
 
+  // Warn if using default (uncalibrated) intrinsics
+  if (fx_ == 600.0 && fy_ == 600.0 && cx_ == 320.0 && cy_ == 240.0) {
+    RCLCPP_WARN(this->get_logger(),
+      "Using DEFAULT camera intrinsics — run tools/calibrate_camera.py and "
+      "update config/params.yaml for accurate target localisation!");
+  }
+  if (cam_pitch > -0.1 && cam_pitch < 0.1) {
+    RCLCPP_WARN(this->get_logger(),
+      "camera_pitch_rad=%.2f (near 0) — camera is forward-facing, "
+      "most pixels will NOT hit the ground plane!", cam_pitch);
+  }
+  if (std::fabs(cam_pitch + M_PI_2) > 0.01 && std::fabs(cam_pitch) > 0.01) {
+    RCLCPP_INFO(this->get_logger(),
+      "Camera mounted at %.1f° from vertical — ensure mount angle is correct",
+      (cam_pitch + M_PI_2) * 180.0 / M_PI);
+  }
+
   // ---- QoS for PX4 topics (best-effort / volatile) ----
   auto px4_qos = rclcpp::SensorDataQoS();
 
@@ -75,6 +92,12 @@ void TargetLocalizer::local_position_cb(
 {
   vehicle_position_ned_ = Eigen::Vector3d(msg->x, msg->y, msg->z);
   position_received_ = true;
+
+  // Warn if altitude is too low for reliable ground projection
+  if (msg->z > -3.0 && msg->z < 0.0) {
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+      "Altitude %.1f m AGL — target projection unreliable below ~5m", -(double)msg->z);
+  }
 }
 
 void TargetLocalizer::detection_cb(
@@ -96,6 +119,15 @@ void TargetLocalizer::detection_cb(
     Eigen::Vector3d target_ned;
     if (!pixel_to_ned(u, v, target_ned)) {
       RCLCPP_DEBUG(this->get_logger(), "Ray did not intersect ground plane");
+      continue;
+    }
+
+    // Sanity check: reject targets projected unreasonably far from drone
+    double horiz_dist = (target_ned - vehicle_position_ned_).head<2>().norm();
+    if (horiz_dist > 200.0) {
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+        "Target [%s] projected %.0f m away — likely bad projection, discarding",
+        class_names[class_id], horiz_dist);
       continue;
     }
 

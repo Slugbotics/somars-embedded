@@ -15,7 +15,7 @@ ones given at check-in:
 ```yaml
 waypoints_lat:    [38.315339, 38.315805, ...]
 waypoints_lon:    [-76.548108, -76.550537, ...]
-waypoints_alt_ft: [200.0, 250.0, ...]
+waypoints_alt_m: [61.0, 76.2, ...]
 ```
 
 Set `waypoint_laps` to the number of full laps you want to fly before
@@ -28,7 +28,7 @@ entering the search/deliver phase.
 MicroXRCEAgent serial --dev /dev/ttyTHS1 -b 921600
 
 # Terminal 2 — build & launch
-cd ~/somars_ws
+cd ~/somars-main
 colcon build --packages-select somars_controls
 source install/setup.bash
 ros2 launch somars_controls controls.launch.py
@@ -74,7 +74,7 @@ Takeoff
 | File | What to edit | When |
 |------|-------------|------|
 | **`config/waypoints.yaml`** | GPS waypoints, number of laps | **Competition day** |
-| `config/params.yaml` | Camera intrinsics, speeds, altitudes | Tuning / calibration |
+| `config/params.yaml` | Camera intrinsics, speeds, altitudes | Tuning / calibration (see **Camera Calibration** below) |
 
 ---
 
@@ -82,9 +82,26 @@ Takeoff
 
 | Node | Purpose |
 |------|---------|
-| `offboard_manager` | PX4 heartbeat, arm/disarm, mode switching |
+| `offboard_manager` | PX4 heartbeat (OffboardControlMode), arm/disarm, mode switching |
 | `guidance_node` | Waypoint navigation + vision-target tracking → publishes `TrajectorySetpoint` |
 | `target_localizer` | Pixel detections → NED world coordinates (camera ray–ground intersection) |
+
+---
+
+## Camera Calibration
+
+The `target_localizer` needs accurate camera intrinsics (fx, fy, cx, cy).
+Run the calibration tool **before flight** with a printed checkerboard:
+
+```bash
+# Live capture (SPACE = capture, Q = done, need ~20 frames):
+python3 tools/calibrate_camera.py --camera 0 --cols 9 --rows 6 --square-size 0.025
+
+# Or from saved images:
+python3 tools/calibrate_camera.py --images ./cal_images --cols 9 --rows 6 --square-size 0.025
+```
+
+Paste the output values into `config/params.yaml` under `target_localizer.ros__parameters`.
 
 ---
 
@@ -97,27 +114,26 @@ cd test && mkdir -p build && cd build
 cmake .. && make && ./test_projection_math
 ```
 
-**Integration test** (needs ROS 2 but no Pixhawk — uses mock publishers):
-
-```bash
-ros2 launch somars_controls integration.launch.py
-```
-
 ---
 
 ## Workspace Setup
 
+This repo lives inside [`somars-main`](https://github.com/Slugbotics/somars-main)
+as a git submodule:
+
 ```
-somars-ws/
+somars-main/               ← colcon workspace root
 ├── src/
-│   ├── somars-embedded/   ← this repo
-│   ├── somars-vision/     ← slugbotics/somars-vision
-│   └── px4_msgs/          ← PX4/px4_msgs
-└── ...
+│   ├── somars-embedded/   ← this repo (submodule)
+│   ├── somars-vision/     ← slugbotics/somars-vision (submodule)
+│   └── px4_msgs/          ← PX4/px4_msgs (submodule)
+├── .gitmodules
+└── README.md
 ```
 
 ```bash
-cd ~/somars_ws
+git clone --recurse-submodules https://github.com/Slugbotics/somars-main.git
+cd somars-main
 colcon build
 source install/setup.bash
 ```

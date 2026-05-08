@@ -45,7 +45,7 @@ private:
   // ---- waypoint helpers ----
   void load_waypoints();
   void convert_waypoints_to_ned();
-  Eigen::Vector3d gps_to_ned(double lat_deg, double lon_deg, double alt_ft_msl) const;
+  Eigen::Vector3d gps_to_ned(double lat_deg, double lon_deg, double alt_m_msl) const;
 
   // ---- subscribers ----
   rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr target_sub_;
@@ -67,7 +67,7 @@ private:
   rclcpp::Time last_target_time_;
 
   // ---- waypoint state ----
-  struct GpsWaypoint { double lat, lon, alt_ft; };
+  struct GpsWaypoint { double lat, lon, alt_m; };
 
   std::vector<GpsWaypoint>   gps_waypoints_;    // raw from config
   std::vector<Eigen::Vector3d> ned_waypoints_;   // computed after ref received

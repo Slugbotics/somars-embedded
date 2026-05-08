@@ -246,6 +246,131 @@ static void test_altitude_scaling()
 }
 
 // ---------------------------------------------------------------------------
+// Test: realistic SOMARS config (640x480 camera, straight down, 20m altitude)
+// Simulates what telemetry.py sends → what target_localizer should compute.
+// ---------------------------------------------------------------------------
+static void test_somars_pipeline_realistic()
+{
+  std::printf("\n--- test_somars_pipeline_realistic ---\n");
+
+  // Typical Jetson camera: 640x480 with moderate focal length
+  double fx = 800.0, fy = 800.0, cx = 320.0, cy = 240.0;
+  Eigen::Matrix3d R_cam_to_body = build_cam_to_body_rotation(-M_PI_2);  // straight down
+  Eigen::Quaterniond attitude = Eigen::Quaterniond::Identity();  // level, heading N
+  Eigen::Vector3d pos_ned(50.0, 30.0, -20.0);  // 20m above ground
+
+  Eigen::Vector3d target;
+
+  // telemetry.py sends bbox center pixel (400, 300) for a detection
+  // 400-320 = 80 pixels right of center → East offset
+  // 300-240 = 60 pixels below center → South offset (for down-facing cam)
+  {
+    bool hit = project_pixel_to_ned(
+      400.0, 300.0, fx, fy, cx, cy,
+      R_cam_to_body, attitude, pos_ned, target);
+    check(hit, "realistic: detection pixel hits ground");
+
+    // Expected East offset:  20m * (400-320)/800 = 20 * 0.1 = 2.0m
+    check_near(target.y(), 32.0, 0.1, "realistic: East offset ≈ +2.0m from drone");
+    // Expected North offset: 20m * -(300-240)/800 = 20 * -0.075 = -1.5m (south)
+    check_near(target.x(), 48.5, 0.1, "realistic: North offset ≈ -1.5m from drone");
+    check_near(target.z(), 0.0, 1e-9, "realistic: target on ground plane");
+  }
+
+  // Edge case: detection at image corner (0, 0) — upper-left
+  {
+    bool hit = project_pixel_to_ned(
+      0.0, 0.0, fx, fy, cx, cy,
+      R_cam_to_body, attitude, pos_ned, target);
+    check(hit, "realistic: upper-left corner hits ground");
+    // (0-320)/800 = -0.4 → West offset = -8m → target E = 30-8 = 22
+    check_near(target.y(), 22.0, 0.1, "realistic: upper-left → west of drone");
+    // (0-240)/800 = -0.3 → North offset = +6m (up in image = forward)
+    check_near(target.x(), 56.0, 0.1, "realistic: upper-left → north of drone");
+  }
+
+  // Tilted drone (20° nose up → camera tilts north → center pixel projects north)
+  {
+    Eigen::Quaterniond pitched_att(
+      Eigen::AngleAxisd(20.0 * M_PI / 180.0, Eigen::Vector3d::UnitY()));
+    bool hit = project_pixel_to_ned(
+      cx, cy, fx, fy, cx, cy,
+      R_cam_to_body, pitched_att, pos_ned, target);
+    check(hit, "realistic: pitched drone, center pixel hits ground");
+    // Nose up → body Z tilts north → down-facing camera looks north of nadir
+    check(target.x() > 50.0, "realistic: nose up → target north of drone");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Test: high altitude (competition altitude ~60m)
+// ---------------------------------------------------------------------------
+static void test_competition_altitude()
+{
+  std::printf("\n--- test_competition_altitude ---\n");
+
+  double fx = 800.0, fy = 800.0, cx = 320.0, cy = 240.0;
+  Eigen::Matrix3d R_cam_to_body = build_cam_to_body_rotation(-M_PI_2);
+  Eigen::Quaterniond attitude = Eigen::Quaterniond::Identity();
+  Eigen::Vector3d pos_ned(0.0, 0.0, -61.0);  // 61m AGL (200ft competition alt)
+
+  Eigen::Vector3d target;
+
+  // Detection 100px right of center at 61m altitude
+  {
+    bool hit = project_pixel_to_ned(
+      420.0, 240.0, fx, fy, cx, cy,
+      R_cam_to_body, attitude, pos_ned, target);
+    check(hit, "competition alt: pixel hits ground");
+    // East offset: 61m * (420-320)/800 = 61 * 0.125 = 7.625m
+    check_near(target.y(), 7.625, 0.1, "competition alt: East offset ≈ 7.6m");
+    check_near(target.x(), 0.0, 0.1, "competition alt: no North offset");
+  }
+
+  // Verify ground footprint width at 61m
+  // Full image width covers: 61m * (640/800) = 61 * 0.8 = 48.8m
+  {
+    Eigen::Vector3d left, right;
+    project_pixel_to_ned(0.0, cy, fx, fy, cx, cy,
+      R_cam_to_body, attitude, pos_ned, left);
+    project_pixel_to_ned(640.0, cy, fx, fy, cx, cy,
+      R_cam_to_body, attitude, pos_ned, right);
+    double footprint = right.y() - left.y();
+    check_near(footprint, 48.8, 0.5, "competition alt: ground footprint ≈ 48.8m wide");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Test: multiple detections in same frame (like telemetry.py sends)
+// ---------------------------------------------------------------------------
+static void test_multiple_detections()
+{
+  std::printf("\n--- test_multiple_detections ---\n");
+
+  double fx = 800.0, fy = 800.0, cx = 320.0, cy = 240.0;
+  Eigen::Matrix3d R_cam_to_body = build_cam_to_body_rotation(-M_PI_2);
+  Eigen::Quaterniond attitude = Eigen::Quaterniond::Identity();
+  Eigen::Vector3d pos_ned(0.0, 0.0, -30.0);  // 30m
+
+  // Simulate two detections: one near center, one at edge
+  Eigen::Vector3d t1, t2;
+  bool h1 = project_pixel_to_ned(330.0, 250.0, fx, fy, cx, cy,
+    R_cam_to_body, attitude, pos_ned, t1);
+  bool h2 = project_pixel_to_ned(600.0, 100.0, fx, fy, cx, cy,
+    R_cam_to_body, attitude, pos_ned, t2);
+
+  check(h1 && h2, "multiple: both detections hit ground");
+
+  // They should be at different NED positions
+  double separation = (t1 - t2).norm();
+  check(separation > 5.0, "multiple: detections are spatially separated");
+
+  // Near-center detection should be close to directly below
+  check_near(t1.x(), 0.0, 1.0, "multiple: near-center ≈ below drone (N)");
+  check_near(t1.y(), 0.0, 1.0, "multiple: near-center ≈ below drone (E)");
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -260,6 +385,9 @@ int main()
   test_pixel_projection_yawed();
   test_ray_miss();
   test_altitude_scaling();
+  test_somars_pipeline_realistic();
+  test_competition_altitude();
+  test_multiple_detections();
 
   std::printf("\n========================================\n");
   std::printf("  Results: %d passed, %d failed\n", g_pass, g_fail);

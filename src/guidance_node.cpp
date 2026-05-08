@@ -10,7 +10,6 @@ namespace somars_controls
 {
 
 static constexpr double R_EARTH = 6371000.0;      // meters
-static constexpr double FT_TO_M = 0.3048;
 static constexpr double DEG_TO_RAD = M_PI / 180.0;
 
 GuidanceNode::GuidanceNode()
@@ -28,7 +27,7 @@ GuidanceNode::GuidanceNode()
   this->declare_parameter("waypoint_radius_m", 30.0);
   this->declare_parameter("waypoints_lat", std::vector<double>{});
   this->declare_parameter("waypoints_lon", std::vector<double>{});
-  this->declare_parameter("waypoints_alt_ft", std::vector<double>{});
+  this->declare_parameter("waypoints_alt_m", std::vector<double>{});
 
   approach_speed_    = this->get_parameter("approach_speed").as_double();
   acceptance_radius_ = this->get_parameter("acceptance_radius").as_double();
@@ -38,6 +37,23 @@ GuidanceNode::GuidanceNode()
   waypoint_radius_   = this->get_parameter("waypoint_radius_m").as_double();
 
   load_waypoints();
+
+  // ---- parameter sanity checks ----
+  if (loiter_altitude_ >= 0.0) {
+    RCLCPP_WARN(this->get_logger(),
+      "loiter_altitude=%.1f — should be NEGATIVE in NED (negative = above ground)!",
+      loiter_altitude_);
+  }
+  if (approach_speed_ > 10.0) {
+    RCLCPP_WARN(this->get_logger(),
+      "approach_speed=%.1f m/s — unusually high, verify this is intentional",
+      approach_speed_);
+  }
+  if (waypoint_radius_ < 5.0) {
+    RCLCPP_WARN(this->get_logger(),
+      "waypoint_radius=%.1f m — very tight, GPS accuracy is typically 2-5m",
+      waypoint_radius_);
+  }
 
   RCLCPP_INFO(this->get_logger(),
     "Guidance: speed=%.1f m/s  wp_radius=%.0f m  loiter_alt=%.1f m  rate=%.0f Hz",
@@ -76,7 +92,7 @@ void GuidanceNode::load_waypoints()
 {
   auto lats = this->get_parameter("waypoints_lat").as_double_array();
   auto lons = this->get_parameter("waypoints_lon").as_double_array();
-  auto alts = this->get_parameter("waypoints_alt_ft").as_double_array();
+  auto alts = this->get_parameter("waypoints_alt_m").as_double_array();
 
   if (lats.empty()) {
     RCLCPP_WARN(this->get_logger(),
@@ -93,7 +109,7 @@ void GuidanceNode::load_waypoints()
 
   gps_waypoints_.clear();
   for (size_t i = 0; i < lats.size(); ++i) {
-    gps_waypoints_.push_back({lats[i], lons[i], alts[i]});
+    gps_waypoints_.push_back({lats[i], lons[i], alts[i]});  // alt in meters MSL
   }
 
   waypoints_loaded_ = true;
@@ -101,8 +117,8 @@ void GuidanceNode::load_waypoints()
     "Loaded %zu waypoints, %d laps planned", gps_waypoints_.size(), total_laps_);
 
   for (size_t i = 0; i < gps_waypoints_.size(); ++i) {
-    RCLCPP_INFO(this->get_logger(), "  WP %zu: lat=%.6f  lon=%.6f  alt=%.0f ft",
-      i + 1, gps_waypoints_[i].lat, gps_waypoints_[i].lon, gps_waypoints_[i].alt_ft);
+    RCLCPP_INFO(this->get_logger(), "  WP %zu: lat=%.6f  lon=%.6f  alt=%.1f m",
+      i + 1, gps_waypoints_[i].lat, gps_waypoints_[i].lon, gps_waypoints_[i].alt_m);
   }
 }
 
@@ -110,7 +126,7 @@ void GuidanceNode::convert_waypoints_to_ned()
 {
   ned_waypoints_.clear();
   for (const auto & wp : gps_waypoints_) {
-    ned_waypoints_.push_back(gps_to_ned(wp.lat, wp.lon, wp.alt_ft));
+    ned_waypoints_.push_back(gps_to_ned(wp.lat, wp.lon, wp.alt_m));
   }
   ned_waypoints_ready_ = true;
 
@@ -124,14 +140,14 @@ void GuidanceNode::convert_waypoints_to_ned()
 }
 
 Eigen::Vector3d GuidanceNode::gps_to_ned(
-  double lat_deg, double lon_deg, double alt_ft_msl) const
+  double lat_deg, double lon_deg, double alt_m_msl) const
 {
   double dlat = (lat_deg - ref_lat_) * DEG_TO_RAD;
   double dlon = (lon_deg - ref_lon_) * DEG_TO_RAD;
 
   double north = dlat * R_EARTH;
   double east  = dlon * R_EARTH * std::cos(ref_lat_ * DEG_TO_RAD);
-  double down  = -(alt_ft_msl * FT_TO_M - ref_alt_m_);
+  double down  = -(alt_m_msl - ref_alt_m_);
 
   return Eigen::Vector3d(north, east, down);
 }
@@ -195,17 +211,34 @@ void GuidanceNode::control_loop()
   sp.yawspeed        = std::numeric_limits<float>::quiet_NaN();
 
   if (!position_received_) {
+    // Hold at NED origin at loiter altitude — valid setpoint required by PX4
+    sp.position[0] = 0.0f;
+    sp.position[1] = 0.0f;
+    sp.position[2] = static_cast<float>(loiter_altitude_);
     setpoint_pub_->publish(sp);
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+      "No vehicle position received yet — publishing hold-at-origin setpoint");
     return;
   }
 
   bool target_stale = (this->now() - last_target_time_).seconds() > 2.0;
   bool waypoints_active = ned_waypoints_ready_ && (current_lap_ < total_laps_);
 
+  // Check if target is valid (fresh + within sane distance)
+  bool target_valid = target_received_ && !target_stale;
+  if (target_valid) {
+    double target_dist = (target_position_ned_ - vehicle_position_ned_).norm();
+    if (target_dist > 500.0) {
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 3000,
+        "Target %.0f m away — possibly bad localisation, ignoring", target_dist);
+      target_valid = false;
+    }
+  }
+
   // ===================================================================
   //  PRIORITY 1: Vision target detected → track it for payload delivery
   // ===================================================================
-  if (target_received_ && !target_stale) {
+  if (target_valid) {
     // ---- Navigate towards target ----
     Eigen::Vector3d to_target = target_position_ned_ - vehicle_position_ned_;
 
@@ -306,8 +339,18 @@ void GuidanceNode::control_loop()
 
     if (target_stale && target_received_) {
       RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
-        "Target data stale – holding position");
+        "Vision target data stale (>2s old) — holding position");
     }
+    if (!waypoints_loaded_) {
+      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 10000,
+        "No waypoints loaded — drone will hold position indefinitely");
+    }
+  }
+
+  // Altitude safety warning
+  if (vehicle_position_ned_.z() > -2.0 && vehicle_position_ned_.z() < 0.0) {
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+      "LOW ALTITUDE: %.1f m AGL — check for obstacles", -vehicle_position_ned_.z());
   }
 
   setpoint_pub_->publish(sp);

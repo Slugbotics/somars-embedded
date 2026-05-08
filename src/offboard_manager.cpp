@@ -1,7 +1,6 @@
 #include "somars_controls/offboard_manager.hpp"
 
 #include <chrono>
-#include <limits>
 
 using namespace std::chrono_literals;
 
@@ -24,6 +23,11 @@ OffboardManager::OffboardManager()
     RCLCPP_WARN(this->get_logger(),
       "auto_arm is ENABLED – drone will arm automatically after %.1f s", arm_delay_s_);
   }
+  if (heartbeat_rate_hz_ < 5.0) {
+    RCLCPP_WARN(this->get_logger(),
+      "heartbeat_rate_hz=%.1f — PX4 requires >= 2Hz to maintain offboard, recommend >= 10Hz",
+      heartbeat_rate_hz_);
+  }
 
   // ---- QoS ----
   auto px4_qos = rclcpp::SensorDataQoS();
@@ -33,16 +37,9 @@ OffboardManager::OffboardManager()
     "/fmu/out/vehicle_status", px4_qos,
     std::bind(&OffboardManager::status_cb, this, std::placeholders::_1));
 
-  local_pos_sub_ = this->create_subscription<px4_msgs::msg::VehicleLocalPosition>(
-    "/fmu/out/vehicle_local_position", px4_qos,
-    std::bind(&OffboardManager::local_position_cb, this, std::placeholders::_1));
-
   // ---- publishers ----
   control_mode_pub_ = this->create_publisher<px4_msgs::msg::OffboardControlMode>(
     "/fmu/in/offboard_control_mode", 10);
-
-  setpoint_pub_ = this->create_publisher<px4_msgs::msg::TrajectorySetpoint>(
-    "/fmu/in/trajectory_setpoint", 10);
 
   command_pub_ = this->create_publisher<px4_msgs::msg::VehicleCommand>(
     "/fmu/in/vehicle_command", 10);
@@ -64,17 +61,21 @@ OffboardManager::OffboardManager()
 void OffboardManager::status_cb(
   const px4_msgs::msg::VehicleStatus::SharedPtr msg)
 {
+  uint8_t prev_nav   = nav_state_;
+  uint8_t prev_arm   = arming_state_;
   nav_state_    = msg->nav_state;
   arming_state_ = msg->arming_state;
-}
+  status_received_ = true;
 
-void OffboardManager::local_position_cb(
-  const px4_msgs::msg::VehicleLocalPosition::SharedPtr msg)
-{
-  hold_x_ = msg->x;
-  hold_y_ = msg->y;
-  hold_z_ = msg->z;
-  position_received_ = true;
+  // Warn on unexpected state changes
+  if (prev_nav == 14 && nav_state_ != 14) {
+    RCLCPP_WARN(this->get_logger(),
+      "OFFBOARD MODE LOST — PX4 nav_state changed from 14 (offboard) to %u", nav_state_);
+  }
+  if (prev_arm == 2 && arming_state_ != 2) {
+    RCLCPP_WARN(this->get_logger(),
+      "DISARMED unexpectedly — arming_state changed to %u", arming_state_);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +86,8 @@ void OffboardManager::heartbeat_loop()
 {
   uint64_t ts = this->get_clock()->now().nanoseconds() / 1000;  // µs
 
-  // 1. OffboardControlMode – must be published continuously
+  // OffboardControlMode – must be published continuously.
+  // TrajectorySetpoint is published solely by guidance_node.
   px4_msgs::msg::OffboardControlMode mode{};
   mode.position     = true;
   mode.velocity     = false;
@@ -95,20 +97,16 @@ void OffboardManager::heartbeat_loop()
   mode.timestamp    = ts;
   control_mode_pub_->publish(mode);
 
-  // 2. Hold-position setpoint (keeps PX4 happy while no guidance is active).
-  //    The guidance_node will overwrite this once it starts publishing.
-  //    Uses current position if known; otherwise a safe default.
-  px4_msgs::msg::TrajectorySetpoint sp{};
-  sp.timestamp    = ts;
-  sp.position[0]  = hold_x_;
-  sp.position[1]  = hold_y_;
-  sp.position[2]  = hold_z_;
-  sp.yaw          = std::numeric_limits<float>::quiet_NaN();  // hold current heading
-  setpoint_pub_->publish(sp);
-
   heartbeat_count_++;
 
-  // 3. Auto-arm sequence (only if enabled)
+  // Warn if PX4 is not responding (no VehicleStatus received)
+  if (!status_received_ && heartbeat_count_ % 50 == 0) {
+    RCLCPP_WARN(this->get_logger(),
+      "No VehicleStatus received from PX4 after %d heartbeats — "
+      "check micro-XRCE-DDS Agent and serial connection", heartbeat_count_);
+  }
+
+  // Auto-arm sequence (only if enabled)
   if (!auto_arm_) {
     return;
   }
@@ -123,6 +121,20 @@ void OffboardManager::heartbeat_loop()
   if (heartbeat_count_ == required_beats + 1) {
     RCLCPP_INFO(this->get_logger(), "Sending ARM command");
     arm();
+  }
+
+  // Check if arm actually succeeded (give it a few seconds)
+  if (heartbeat_count_ == required_beats + static_cast<int>(heartbeat_rate_hz_ * 3)) {
+    if (arming_state_ != 2) {
+      RCLCPP_WARN(this->get_logger(),
+        "ARM command sent but vehicle still not armed (state=%u) — "
+        "check pre-arm checks in QGroundControl", arming_state_);
+    }
+    if (nav_state_ != 14) {
+      RCLCPP_WARN(this->get_logger(),
+        "OFFBOARD mode requested but nav_state=%u (expected 14) — "
+        "is another controller overriding?", nav_state_);
+    }
   }
 }
 
