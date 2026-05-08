@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>somars_controls</name>
+  <version>0.1.0</version>
+  <description>
+    SOMARS autonomous drone controls for the C-UASC competition.
+    Provides target localisation (pixel-to-NED projection), guidance
+    (trajectory setpoint generation), and offboard lifecycle management
+    for a Pixhawk 6X running PX4 via micro-XRCE-DDS.
+  </description>
+
+  <maintainer email="somars@ucsc.edu">SOMARS Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>px4_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+
+  <build_depend>eigen</build_depend>
+  <build_depend>eigen3_cmake_module</build_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
