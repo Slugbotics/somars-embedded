@@ -119,24 +119,15 @@ cmake .. && make && ./test_projection_math
 ## Workspace Setup
 
 This repo lives inside [`somars-main`](https://github.com/Slugbotics/somars-main)
-as a git submodule:
-
-```
-somars-main/               ← colcon workspace root
-├── src/
-│   ├── somars-embedded/   ← this repo (submodule)
-│   ├── somars-vision/     ← slugbotics/somars-vision (submodule)
-│   └── px4_msgs/          ← PX4/px4_msgs (submodule)
-├── .gitmodules
-└── README.md
-```
-
+as a git submodule
+<!--
 ```bash
 git clone --recurse-submodules https://github.com/Slugbotics/somars-main.git
 cd somars-main
 colcon build
 source install/setup.bash
 ```
+-->
 
 ## Dependencies
 
