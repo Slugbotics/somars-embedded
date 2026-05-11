@@ -66,6 +66,10 @@ GuidanceNode::GuidanceNode()
   target_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
     "/targets/ned", 10,
     std::bind(&GuidanceNode::target_cb, this, std::placeholders::_1));
+  
+  best_target_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
+    "/targets/best_ned", 10,
+    std::bind(&GuidanceNode::best_target_cb, this, std::placeholders::_1));
 
   local_pos_sub_ = this->create_subscription<px4_msgs::msg::VehicleLocalPosition>(
     "/fmu/out/vehicle_local_position", px4_qos,
@@ -164,6 +168,15 @@ void GuidanceNode::target_cb(
   last_target_time_ = this->now();
 }
 
+void GuidanceNode::best_target_cb(
+  const geometry_msgs::msg::PointStamped::SharedPtr msg)
+{
+  best_target_position_ned_ = Eigen::Vector3d(msg->point.x, msg->point.y, msg->point.z);
+  target_position_ned_ = best_target_position_ned_;
+  target_received_ = true;
+  last_target_time_ = this->now();
+}
+
 void GuidanceNode::local_position_cb(
   const px4_msgs::msg::VehicleLocalPosition::SharedPtr msg)
 {
@@ -222,6 +235,7 @@ void GuidanceNode::control_loop()
   }
 
   bool target_stale = (this->now() - last_target_time_).seconds() > 2.0;
+  // TODO: maybe use best target instead in this case or fly to cpmpetition provided target location
   bool waypoints_active = ned_waypoints_ready_ && (current_lap_ < total_laps_);
 
   // Check if target is valid (fresh + within sane distance)
@@ -239,6 +253,8 @@ void GuidanceNode::control_loop()
   //  PRIORITY 1: Vision target detected → track it for payload delivery
   // ===================================================================
   if (target_valid) {
+    // TODO: only fly to target if we are trying to drop a payload
+    //    If we are flying the waypoint loop or have already dropped the payload, do not track target
     // ---- Navigate towards target ----
     Eigen::Vector3d to_target = target_position_ned_ - vehicle_position_ned_;
 
@@ -260,6 +276,7 @@ void GuidanceNode::control_loop()
     } else {
       // Move towards target at approach_speed_, staying at loiter altitude
       Eigen::Vector3d direction = to_target.normalized();
+      // TODO: maybe fly directly to target instead of stepping
       double step = std::min(approach_speed_ * 0.5, dist);
       desired_pos = vehicle_position_ned_ + direction * step;
       desired_pos.z() = loiter_altitude_;
@@ -332,6 +349,7 @@ void GuidanceNode::control_loop()
   //  PRIORITY 3: Nothing to do → hold position
   // ===================================================================
   } else {
+    // TODO: fly to competition provided target location
     // ---- No active target – hold current XY at loiter altitude ----
     sp.position[0] = static_cast<float>(vehicle_position_ned_.x());
     sp.position[1] = static_cast<float>(vehicle_position_ned_.y());

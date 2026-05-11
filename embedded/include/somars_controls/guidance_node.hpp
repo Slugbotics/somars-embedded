@@ -37,6 +37,7 @@ public:
 private:
   // ---- callbacks ----
   void target_cb(const geometry_msgs::msg::PointStamped::SharedPtr msg);
+  void best_target_cb(const geometry_msgs::msg::PointStamped::SharedPtr msg);
   void local_position_cb(const px4_msgs::msg::VehicleLocalPosition::SharedPtr msg);
 
   /// Fixed-rate control loop called by the timer.
@@ -49,6 +50,7 @@ private:
 
   // ---- subscribers ----
   rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr target_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr best_target_sub_;
   rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr local_pos_sub_;
 
   // ---- publishers ----
@@ -60,6 +62,7 @@ private:
   // ---- vehicle state ----
   Eigen::Vector3d vehicle_position_ned_{0.0, 0.0, 0.0};
   Eigen::Vector3d target_position_ned_{0.0, 0.0, 0.0};
+  Eigen::Vector3d best_target_position_ned_{0.0, 0.0, 0.0};
   bool target_received_   = false;
   bool position_received_ = false;
 

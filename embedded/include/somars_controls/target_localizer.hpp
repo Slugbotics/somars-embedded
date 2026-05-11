@@ -52,12 +52,14 @@ private:
 
   // ---- publishers ----
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr target_ned_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr best_target_ned_pub_;
 
   // ---- state ----
   Eigen::Quaterniond vehicle_attitude_{1.0, 0.0, 0.0, 0.0};
   Eigen::Vector3d    vehicle_position_ned_{0.0, 0.0, 0.0};
   bool attitude_received_  = false;
   bool position_received_  = false;
+  double best_confidence_ = 0.0;
 
   // ---- camera parameters (loaded from params.yaml) ----
   double fx_, fy_, cx_, cy_;
