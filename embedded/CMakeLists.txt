@@ -14,6 +14,7 @@ find_package(px4_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(messages REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 include_directories(
@@ -27,7 +28,7 @@ include_directories(
 
 add_executable(target_localizer src/target_localizer.cpp)
 ament_target_dependencies(target_localizer
-  rclcpp px4_msgs geometry_msgs std_msgs sensor_msgs)
+  rclcpp px4_msgs geometry_msgs std_msgs sensor_msgs messages)
 target_link_libraries(target_localizer Eigen3::Eigen)
 
 add_executable(guidance_node src/guidance_node.cpp)
@@ -41,7 +42,7 @@ ament_target_dependencies(offboard_manager
 
 add_executable(mock_nodes test/mock_nodes.cpp)
 ament_target_dependencies(mock_nodes
-  rclcpp px4_msgs geometry_msgs std_msgs)
+  rclcpp px4_msgs geometry_msgs std_msgs messages)
 
 # ---------------------------------------------------------------------------
 # Install

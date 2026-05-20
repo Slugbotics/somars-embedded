@@ -1,5 +1,6 @@
 #include "somars_controls/target_localizer.hpp"
 #include "somars_controls/projection.hpp"
+#include "messages/msg/detection.hpp"
 
 #include <cmath>
 #include <string>
@@ -64,13 +65,16 @@ TargetLocalizer::TargetLocalizer()
     std::bind(&TargetLocalizer::local_position_cb, this, std::placeholders::_1));
 
   // Vision detections – uses default reliable QoS (local ROS2 topic)
-  detection_sub_ = this->create_subscription<geometry_msgs::msg::PoseArray>(
-    "/vision/detections", 10,
+  detection_sub_ = this->create_subscription<messages::msg::Detection>(
+    "/vision/detection", 10,
     std::bind(&TargetLocalizer::detection_cb, this, std::placeholders::_1));
 
   // ---- publishers ----
   target_ned_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(
     "/targets/ned", 10);
+  
+  best_target_ned_pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(
+    "/targets/best_ned", 10);
 
   RCLCPP_INFO(this->get_logger(), "TargetLocalizer node started");
 }
@@ -101,7 +105,7 @@ void TargetLocalizer::local_position_cb(
 }
 
 void TargetLocalizer::detection_cb(
-  const geometry_msgs::msg::PoseArray::SharedPtr msg)
+  const messages::msg::Detection::SharedPtr msg)
 {
   if (!attitude_received_ || !position_received_) {
     RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
@@ -109,39 +113,47 @@ void TargetLocalizer::detection_cb(
     return;
   }
 
-  static const char * class_names[] = {"red", "black", "white", "unknown"};
+  double u = static_cast<double>(msg->x);   // pixel column
+  double v = static_cast<double>(msg->y);   // pixel row
+  double timestamp = msg->timestamp;        // seconds since epoch
+  double confidence = msg->confidence;      // 0.0 to 1.0
+  int class_id = static_cast<int>(msg->class_id);
+  if(class_id != 0 || timestamp <= 0.0 || confidence <= 0.0){
+    // Not a valid target
+    return;
+  }
 
-  for (const auto & pose : msg->poses) {
-    double u = pose.position.x;   // pixel column
-    double v = pose.position.y;   // pixel row
-    int class_id = std::clamp(static_cast<int>(pose.position.z), 0, 3);
+  Eigen::Vector3d target_ned;
+  // TODO: account for latency by using the timestamp to get the correct vehicle state at time of capture
+  if (!pixel_to_ned(u, v, target_ned)) {
+    RCLCPP_DEBUG(this->get_logger(), "Ray did not intersect ground plane");
+    return;
+  }
 
-    Eigen::Vector3d target_ned;
-    if (!pixel_to_ned(u, v, target_ned)) {
-      RCLCPP_DEBUG(this->get_logger(), "Ray did not intersect ground plane");
-      continue;
-    }
+  // Sanity check: reject targets projected unreasonably far from drone
+  double horiz_dist = (target_ned - vehicle_position_ned_).head<2>().norm();
+  if (horiz_dist > 200.0) {
+    RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+      "Target projected %.0f m away — likely bad projection, discarding",
+       horiz_dist);
+    return;
+  }
 
-    // Sanity check: reject targets projected unreasonably far from drone
-    double horiz_dist = (target_ned - vehicle_position_ned_).head<2>().norm();
-    if (horiz_dist > 200.0) {
-      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-        "Target [%s] projected %.0f m away — likely bad projection, discarding",
-        class_names[class_id], horiz_dist);
-      continue;
-    }
+  geometry_msgs::msg::PointStamped out;
+  out.header.stamp    = this->now();
+  out.header.frame_id = std::string("target");
+  out.point.x = target_ned.x();
+  out.point.y = target_ned.y();
+  out.point.z = target_ned.z();
+  target_ned_pub_->publish(out);
 
-    geometry_msgs::msg::PointStamped out;
-    out.header.stamp    = this->now();
-    out.header.frame_id = std::string("target_") + class_names[class_id];
-    out.point.x = target_ned.x();
-    out.point.y = target_ned.y();
-    out.point.z = target_ned.z();
-    target_ned_pub_->publish(out);
+  RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+    "Target NED: [%.2f, %.2f, %.2f]  from pixel [%.0f, %.0f]",
+    target_ned.x(), target_ned.y(), target_ned.z(), u, v);
 
-    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
-      "Target [%s] NED: [%.2f, %.2f, %.2f]  from pixel [%.0f, %.0f]",
-      class_names[class_id], target_ned.x(), target_ned.y(), target_ned.z(), u, v);
+  if(confidence > best_confidence_){
+    best_confidence_ = confidence;
+    best_target_ned_pub_->publish(out);
   }
 }
 

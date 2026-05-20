@@ -6,7 +6,7 @@
 //   /fmu/out/vehicle_attitude         – identity quaternion (level, heading N)
 //   /fmu/out/vehicle_local_position   – hovering at configurable NED position
 //   /fmu/out/vehicle_status           – armed, in offboard mode
-//   /vision/detections                – one detection at configurable pixel coords
+//   /vision/detection                 – one detection at configurable pixel coords
 //
 // Usage (after building in a ROS2 workspace):
 //   ros2 run somars_controls mock_nodes
@@ -18,7 +18,7 @@
 #include <px4_msgs/msg/vehicle_attitude.hpp>
 #include <px4_msgs/msg/vehicle_local_position.hpp>
 #include <px4_msgs/msg/vehicle_status.hpp>
-#include <geometry_msgs/msg/pose_array.hpp>
+#include "messages/msg/detection.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -58,8 +58,8 @@ public:
       "/fmu/out/vehicle_local_position", rclcpp::SensorDataQoS());
     stat_pub_  = this->create_publisher<px4_msgs::msg::VehicleStatus>(
       "/fmu/out/vehicle_status", rclcpp::SensorDataQoS());
-    det_pub_   = this->create_publisher<geometry_msgs::msg::PoseArray>(
-      "/vision/detections", 10);
+    det_pub_   = this->create_publisher<messages::msg::Detection>(
+      "/vision/detection", 10);
 
     auto period = std::chrono::duration<double>(1.0 / rate);
     timer_ = this->create_wall_timer(
@@ -110,15 +110,12 @@ private:
 
     // -- Vision detections --
     if (enable_det_) {
-      geometry_msgs::msg::PoseArray det{};
-      det.header.stamp    = this->now();
-      det.header.frame_id = "camera";
-
-      geometry_msgs::msg::Pose p;
-      p.position.x = det_u_;
-      p.position.y = det_v_;
-      p.position.z = static_cast<double>(det_class_);
-      det.poses.push_back(p);
+      messages::msg::Detection det{};
+      det.x = static_cast<int32_t>(det_u_);
+      det.y = static_cast<int32_t>(det_v_);
+      det.class_id = static_cast<int8_t>(det_class_);
+      det.timestamp = static_cast<double>(ts) / 1e6; // seconds
+      det.confidence = 1.0;
       det_pub_->publish(det);
     }
 
@@ -131,7 +128,7 @@ private:
   rclcpp::Publisher<px4_msgs::msg::VehicleAttitude>::SharedPtr att_pub_;
   rclcpp::Publisher<px4_msgs::msg::VehicleLocalPosition>::SharedPtr pos_pub_;
   rclcpp::Publisher<px4_msgs::msg::VehicleStatus>::SharedPtr stat_pub_;
-  rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr det_pub_;
+  rclcpp::Publisher<messages::msg::Detection>::SharedPtr det_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 
   double alt_, north_, east_, yaw_rad_;

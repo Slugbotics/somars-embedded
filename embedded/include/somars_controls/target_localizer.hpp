@@ -5,7 +5,7 @@
 #include <px4_msgs/msg/vehicle_local_position.hpp>
 #include <px4_msgs/msg/vehicle_attitude.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
-#include <geometry_msgs/msg/pose_array.hpp>
+#include "messages/msg/detection.hpp"
 
 #include <Eigen/Dense>
 
@@ -18,10 +18,10 @@ namespace somars_controls
 /// Subscriptions
 ///   /fmu/out/vehicle_attitude         – VehicleAttitude   (PX4)
 ///   /fmu/out/vehicle_local_position   – VehicleLocalPosition (PX4)
-///   /vision/detections                – PoseArray (from somars-vision)
-///       Each Pose encodes: position.x = pixel u
-///                          position.y = pixel v
-///                          position.z = class id (0=red, 1=black, 2=white)
+///   /vision/detection                – Detection (from somars-vision)
+///       Fields: x = pixel column (u)
+///               y = pixel row (v)
+///               class_id = class id (0=red, 1=black, 2=white)
 ///
 /// Publications
 ///   /targets/ned  – PointStamped (target position in local NED frame)
@@ -34,7 +34,7 @@ private:
   // ---- callbacks ----
   void attitude_cb(const px4_msgs::msg::VehicleAttitude::SharedPtr msg);
   void local_position_cb(const px4_msgs::msg::VehicleLocalPosition::SharedPtr msg);
-  void detection_cb(const geometry_msgs::msg::PoseArray::SharedPtr msg);
+  void detection_cb(const messages::msg::Detection::SharedPtr msg);
 
   // ---- helpers ----
   /// Back-project a single pixel (u, v) through the camera model, rotate into
@@ -48,16 +48,18 @@ private:
   // ---- subscribers ----
   rclcpp::Subscription<px4_msgs::msg::VehicleAttitude>::SharedPtr attitude_sub_;
   rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr local_pos_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseArray>::SharedPtr detection_sub_;
+  rclcpp::Subscription<messages::msg::Detection>::SharedPtr detection_sub_;
 
   // ---- publishers ----
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr target_ned_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr best_target_ned_pub_;
 
   // ---- state ----
   Eigen::Quaterniond vehicle_attitude_{1.0, 0.0, 0.0, 0.0};
   Eigen::Vector3d    vehicle_position_ned_{0.0, 0.0, 0.0};
   bool attitude_received_  = false;
   bool position_received_  = false;
+  double best_confidence_ = 0.0;
 
   // ---- camera parameters (loaded from params.yaml) ----
   double fx_, fy_, cx_, cy_;
